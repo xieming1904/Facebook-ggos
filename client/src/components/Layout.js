@@ -13,6 +13,7 @@ import {
   DashboardOutlined,
   GlobalOutlined,
   FileTextOutlined,
+  ExperimentOutlined,
   ShieldOutlined,
   BarChartOutlined,
   UserOutlined,
@@ -47,6 +48,11 @@ const Layout = () => {
       key: '/landing-pages',
       icon: <FileTextOutlined />,
       label: '落地页管理',
+    },
+    {
+      key: '/ab-tests',
+      icon: <ExperimentOutlined />,
+      label: 'A/B测试',
     },
     {
       key: '/cloak',

@@ -11,6 +11,7 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Domains from './pages/Domains';
 import LandingPages from './pages/LandingPages';
+import ABTests from './pages/ABTests';
 import CloakSettings from './pages/CloakSettings';
 import Analytics from './pages/Analytics';
 import Users from './pages/Users';
@@ -30,6 +31,7 @@ function App() {
                 <Route path="dashboard" element={<Dashboard />} />
                 <Route path="domains" element={<Domains />} />
                 <Route path="landing-pages" element={<LandingPages />} />
+                <Route path="ab-tests" element={<ABTests />} />
                 <Route path="cloak" element={<CloakSettings />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="users" element={<Users />} />

@@ -36,9 +36,19 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/facebook-
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => {
+.then(async () => {
   console.log('MongoDB connected');
   logger.logSystemEvent('database_connected', { uri: process.env.MONGODB_URI ? 'configured' : 'default' });
+  
+  // 启动自动化引擎
+  try {
+    const automationEngine = require('./utils/automationEngine');
+    await automationEngine.start();
+    console.log('Automation engine started');
+  } catch (error) {
+    console.error('Failed to start automation engine:', error);
+    logger.error('Automation engine start failed', { error: error.message });
+  }
 })
 .catch(err => {
   console.error('MongoDB connection error:', err);
@@ -55,9 +65,15 @@ app.use('/api/analytics', require('./routes/analytics'));
 app.use('/api/settings', require('./routes/settings'));
 app.use('/api/system', require('./routes/system'));
 app.use('/api/logs', require('./routes/logs'));
+app.use('/api/ab-tests', require('./routes/abTests'));
+app.use('/api/automation-rules', require('./routes/automationRules'));
 
 // Cloak中间件 - 检测Facebook爬虫
 app.use('/page/:id', require('./middleware/cloakMiddleware'));
+
+// A/B测试中间件
+const { abTestMiddleware, abTestStatsMiddleware } = require('./middleware/abTestMiddleware');
+app.use('/page/:id', abTestMiddleware, abTestStatsMiddleware);
 
 // 落地页路由
 app.get('/page/:id', require('./routes/pageViewer'));
