@@ -10,8 +10,14 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ error: 'Access denied. No token provided.' });
     }
     
+    // 验证JWT_SECRET环境变量
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET environment variable is not set');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    
     // 验证token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     // 检查用户是否存在且活跃
     const user = await User.findById(decoded.userId);

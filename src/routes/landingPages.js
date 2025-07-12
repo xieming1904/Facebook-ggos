@@ -4,6 +4,7 @@ const auth = require('../middleware/auth');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { validateObjectIdParam, validatePagination } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -40,27 +41,28 @@ const upload = multer({
 router.get('/', auth, async (req, res) => {
   try {
     const query = req.user.role === 'admin' ? {} : { createdBy: req.user.userId };
-    const { type, template, page = 1, limit = 10 } = req.query;
+    const { type, template } = req.query;
     
     // 构建查询条件
     if (type) query.type = type;
     if (template) query.template = template;
     
-    const skip = (page - 1) * limit;
+    // 验证并处理分页参数
+    const { page, limit, skip } = validatePagination(req.query.page, req.query.limit);
     
     const landingPages = await LandingPage.find(query)
       .populate('createdBy', 'username')
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(parseInt(limit));
+      .limit(limit);
     
     const total = await LandingPage.countDocuments(query);
     
     res.json({
       landingPages,
       pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
+        page,
+        limit,
         total,
         pages: Math.ceil(total / limit)
       }
@@ -73,7 +75,7 @@ router.get('/', auth, async (req, res) => {
 });
 
 // 获取单个落地页详情
-router.get('/:id', auth, async (req, res) => {
+router.get('/:id', auth, validateObjectIdParam(), async (req, res) => {
   try {
     const landingPage = await LandingPage.findById(req.params.id)
       .populate('createdBy', 'username');
@@ -142,7 +144,7 @@ router.post('/', auth, async (req, res) => {
 });
 
 // 更新落地页
-router.put('/:id', auth, async (req, res) => {
+router.put('/:id', auth, validateObjectIdParam(), async (req, res) => {
   try {
     const landingPage = await LandingPage.findById(req.params.id);
     

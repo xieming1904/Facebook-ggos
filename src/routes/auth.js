@@ -2,6 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const auth = require('../middleware/auth');
+const { validateEmail, validatePassword, validateUsername, validateObjectIdParam } = require('../utils/validation');
 
 const router = express.Router();
 
@@ -9,6 +10,42 @@ const router = express.Router();
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password, role } = req.body;
+    
+    // 验证必需字段
+    if (!username || !email || !password) {
+      return res.status(400).json({ 
+        error: 'Username, email, and password are required' 
+      });
+    }
+    
+    // 验证邮箱格式
+    if (!validateEmail(email)) {
+      return res.status(400).json({ 
+        error: 'Invalid email format' 
+      });
+    }
+    
+    // 验证用户名格式
+    if (!validateUsername(username)) {
+      return res.status(400).json({ 
+        error: 'Username must be 3-20 characters long and can only contain letters, numbers, and underscores' 
+      });
+    }
+    
+    // 验证密码强度
+    if (!validatePassword(password)) {
+      return res.status(400).json({ 
+        error: 'Password must be at least 8 characters long and contain at least one uppercase letter, one lowercase letter, and one number' 
+      });
+    }
+    
+    // 验证角色
+    const validRoles = ['admin', 'user', 'owner', 'manager', 'viewer'];
+    if (role && !validRoles.includes(role)) {
+      return res.status(400).json({ 
+        error: 'Invalid role specified' 
+      });
+    }
     
     // 检查用户是否已存在
     const existingUser = await User.findOne({ 
@@ -23,18 +60,24 @@ router.post('/register', async (req, res) => {
     
     // 创建新用户
     const user = new User({
-      username,
-      email,
+      username: username.trim(),
+      email: email.trim().toLowerCase(),
       password,
       role: role || 'user'
     });
     
     await user.save();
     
+    // 验证JWT_SECRET环境变量
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET environment variable is not set');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    
     // 生成JWT token
     const token = jwt.sign(
       { userId: user._id, role: user.role },
-      process.env.JWT_SECRET || 'your-secret-key',
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
     
@@ -60,9 +103,23 @@ router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body;
     
+    // 验证必需字段
+    if (!username || !password) {
+      return res.status(400).json({ 
+        error: 'Username and password are required' 
+      });
+    }
+    
+    // 验证输入长度
+    if (username.length > 255 || password.length > 255) {
+      return res.status(400).json({ 
+        error: 'Input too long' 
+      });
+    }
+    
     // 查找用户
     const user = await User.findOne({ 
-      $or: [{ username }, { email: username }] 
+      $or: [{ username: username.trim() }, { email: username.trim().toLowerCase() }] 
     });
     
     if (!user || !user.isActive) {
@@ -83,10 +140,16 @@ router.post('/login', async (req, res) => {
     user.lastLogin = new Date();
     await user.save();
     
+    // 验证JWT_SECRET环境变量
+    if (!process.env.JWT_SECRET) {
+      console.error('JWT_SECRET environment variable is not set');
+      return res.status(500).json({ error: 'Server configuration error' });
+    }
+    
     // 生成JWT token
     const token = jwt.sign(
       { userId: user._id, role: user.role },
-      process.env.JWT_SECRET || 'your-secret-key',
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
     
@@ -180,7 +243,7 @@ router.get('/users', auth, async (req, res) => {
 });
 
 // 管理员更新用户状态
-router.put('/users/:id/status', auth, async (req, res) => {
+router.put('/users/:id/status', auth, validateObjectIdParam(), async (req, res) => {
   try {
     // 检查权限
     if (req.user.role !== 'admin') {
@@ -188,6 +251,11 @@ router.put('/users/:id/status', auth, async (req, res) => {
     }
     
     const { isActive } = req.body;
+    
+    // 验证 isActive 参数
+    if (typeof isActive !== 'boolean') {
+      return res.status(400).json({ error: 'isActive must be a boolean value' });
+    }
     
     const user = await User.findByIdAndUpdate(
       req.params.id,
