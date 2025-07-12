@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# Facebook广告落地页管理系统一键部署脚本
-# 作者: Landing Page System
-# 版本: 1.0.0
+# Facebook广告落地页管理系统 - 部署脚本
+# 版本: 2.0 (完善版)
+# 作者: Landing Page System Team
 
 set -e
 
@@ -14,275 +14,679 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 日志函数
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $1"
+log() {
+    echo -e "${GREEN}[$(date +'%Y-%m-%d %H:%M:%S')] $1${NC}"
 }
 
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $1"
+warn() {
+    echo -e "${YELLOW}[$(date +'%Y-%m-%d %H:%M:%S')] WARNING: $1${NC}"
 }
 
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $1"
+error() {
+    echo -e "${RED}[$(date +'%Y-%m-%d %H:%M:%S')] ERROR: $1${NC}"
 }
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
+info() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"
 }
 
 # 检查是否为root用户
 check_root() {
-    if [[ $EUID -eq 0 ]]; then
-        log_error "请不要使用root用户运行此脚本"
-        exit 1
+    if [[ $EUID -ne 0 ]]; then
+        warn "建议使用root用户运行此脚本以避免权限问题"
+        read -p "是否继续？(y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
     fi
 }
 
 # 检查系统要求
 check_requirements() {
-    log_info "检查系统要求..."
+    info "检查系统要求..."
     
     # 检查操作系统
     if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        log_success "操作系统: Linux"
+        log "系统: Linux"
     elif [[ "$OSTYPE" == "darwin"* ]]; then
-        log_success "操作系统: macOS"
+        log "系统: MacOS"
     else
-        log_error "不支持的操作系统: $OSTYPE"
+        error "不支持的操作系统: $OSTYPE"
         exit 1
     fi
     
-    # 检查Docker
-    if ! command -v docker &> /dev/null; then
-        log_error "Docker未安装，请先安装Docker"
-        exit 1
-    fi
-    log_success "Docker已安装: $(docker --version)"
+    # 检查必要的命令
+    local required_commands=("curl" "git" "unzip")
+    for cmd in "${required_commands[@]}"; do
+        if ! command -v $cmd &> /dev/null; then
+            error "缺少必要的命令: $cmd"
+            exit 1
+        fi
+    done
     
-    # 检查Docker Compose
-    if ! command -v docker-compose &> /dev/null; then
-        log_error "Docker Compose未安装，请先安装Docker Compose"
-        exit 1
+    log "系统要求检查完成"
+}
+
+# 安装 Node.js
+install_nodejs() {
+    if command -v node &> /dev/null; then
+        local node_version=$(node -v)
+        log "Node.js 已安装: $node_version"
+        
+        # 检查版本是否符合要求 (>=16.0.0)
+        local version_number=$(echo $node_version | sed 's/v//' | cut -d. -f1)
+        if [ "$version_number" -lt 16 ]; then
+            warn "Node.js 版本过低 ($node_version)，建议升级到 16.0.0 或更高版本"
+        fi
+        return 0
     fi
-    log_success "Docker Compose已安装: $(docker-compose --version)"
     
-    # 检查端口占用
-    if netstat -tuln | grep -q ":80 "; then
-        log_warning "端口80已被占用，可能会影响部署"
+    info "安装 Node.js 18.x..."
+    
+    # 安装 Node.js 18.x
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+        sudo apt-get install -y nodejs
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        if command -v brew &> /dev/null; then
+            brew install node@18
+        else
+            error "macOS 上需要 Homebrew 来安装 Node.js"
+            exit 1
+        fi
     fi
     
-    if netstat -tuln | grep -q ":443 "; then
-        log_warning "端口443已被占用，可能会影响部署"
+    log "Node.js 安装完成: $(node -v)"
+}
+
+# 安装 MongoDB
+install_mongodb() {
+    if command -v mongod &> /dev/null; then
+        log "MongoDB 已安装"
+        return 0
+    fi
+    
+    info "安装 MongoDB..."
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # Ubuntu/Debian
+        if command -v apt-get &> /dev/null; then
+            wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+            echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+            sudo apt-get update
+            sudo apt-get install -y mongodb-org
+            sudo systemctl start mongod
+            sudo systemctl enable mongod
+        # CentOS/RHEL
+        elif command -v yum &> /dev/null; then
+            cat <<EOF | sudo tee /etc/yum.repos.d/mongodb-org-6.0.repo
+[mongodb-org-6.0]
+name=MongoDB Repository
+baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/6.0/x86_64/
+gpgcheck=1
+enabled=1
+gpgkey=https://www.mongodb.org/static/pgp/server-6.0.asc
+EOF
+            sudo yum install -y mongodb-org
+            sudo systemctl start mongod
+            sudo systemctl enable mongod
+        fi
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        if command -v brew &> /dev/null; then
+            brew tap mongodb/brew
+            brew install mongodb-community
+            brew services start mongodb-community
+        else
+            error "macOS 上需要 Homebrew 来安装 MongoDB"
+            exit 1
+        fi
+    fi
+    
+    log "MongoDB 安装完成"
+}
+
+# 安装 Docker 和 Docker Compose
+install_docker() {
+    if command -v docker &> /dev/null && command -v docker-compose &> /dev/null; then
+        log "Docker 和 Docker Compose 已安装"
+        return 0
+    fi
+    
+    info "安装 Docker 和 Docker Compose..."
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        # 安装 Docker
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sudo sh get-docker.sh
+        sudo usermod -aG docker $USER
+        
+        # 安装 Docker Compose
+        sudo curl -L "https://github.com/docker/compose/releases/download/v2.21.0/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        sudo chmod +x /usr/local/bin/docker-compose
+        
+        # 启动 Docker
+        sudo systemctl start docker
+        sudo systemctl enable docker
+        
+        rm get-docker.sh
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        warn "请手动安装 Docker Desktop for Mac"
+        open "https://www.docker.com/products/docker-desktop"
+        read -p "安装完成后按 Enter 继续..."
+    fi
+    
+    log "Docker 安装完成"
+}
+
+# 安装 Nginx
+install_nginx() {
+    if command -v nginx &> /dev/null; then
+        log "Nginx 已安装"
+        return 0
+    fi
+    
+    info "安装 Nginx..."
+    
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y nginx
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y nginx
+        fi
+        
+        sudo systemctl start nginx
+        sudo systemctl enable nginx
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        if command -v brew &> /dev/null; then
+            brew install nginx
+            brew services start nginx
+        fi
+    fi
+    
+    log "Nginx 安装完成"
+}
+
+# 配置防火墙
+configure_firewall() {
+    info "配置防火墙..."
+    
+    if command -v ufw &> /dev/null; then
+        sudo ufw allow 22/tcp
+        sudo ufw allow 80/tcp
+        sudo ufw allow 443/tcp
+        sudo ufw allow 3000/tcp
+        sudo ufw allow 5000/tcp
+        sudo ufw --force enable
+        log "UFW 防火墙配置完成"
+    elif command -v firewall-cmd &> /dev/null; then
+        sudo firewall-cmd --permanent --add-port=22/tcp
+        sudo firewall-cmd --permanent --add-port=80/tcp
+        sudo firewall-cmd --permanent --add-port=443/tcp
+        sudo firewall-cmd --permanent --add-port=3000/tcp
+        sudo firewall-cmd --permanent --add-port=5000/tcp
+        sudo firewall-cmd --reload
+        log "Firewalld 防火墙配置完成"
+    else
+        warn "未找到防火墙管理工具，请手动配置防火墙"
     fi
 }
 
 # 创建必要的目录
 create_directories() {
-    log_info "创建必要的目录..."
+    info "创建必要的目录..."
     
-    mkdir -p uploads/screenshots
-    mkdir -p logs
-    mkdir -p ssl
+    local directories=(
+        "logs"
+        "uploads"
+        "backups"
+        "ssl"
+        "config"
+        "tmp"
+    )
     
-    log_success "目录创建完成"
+    for dir in "${directories[@]}"; do
+        if [ ! -d "$dir" ]; then
+            mkdir -p "$dir"
+            log "创建目录: $dir"
+        fi
+    done
+    
+    # 设置权限
+    chmod 755 logs uploads backups ssl config tmp
+    log "目录创建完成"
 }
 
-# 生成SSL证书
-generate_ssl_cert() {
-    log_info "生成SSL证书..."
+# 安装项目依赖
+install_dependencies() {
+    info "安装项目依赖..."
     
-    if [[ ! -f ssl/cert.pem ]] || [[ ! -f ssl/key.pem ]]; then
-        openssl req -x509 -newkey rsa:4096 -keyout ssl/key.pem -out ssl/cert.pem -days 365 -nodes \
-            -subj "/C=CN/ST=Beijing/L=Beijing/O=Facebook Ads System/OU=IT Department/CN=localhost"
-        log_success "SSL证书生成完成"
-    else
-        log_info "SSL证书已存在，跳过生成"
+    # 安装后端依赖
+    if [ -f "package.json" ]; then
+        log "安装后端依赖..."
+        npm install
     fi
+    
+    # 安装前端依赖
+    if [ -d "client" ] && [ -f "client/package.json" ]; then
+        log "安装前端依赖..."
+        cd client
+        npm install
+        cd ..
+    fi
+    
+    log "依赖安装完成"
 }
 
-# 创建MongoDB初始化脚本
-create_mongo_init() {
-    log_info "创建MongoDB初始化脚本..."
+# 生成环境配置文件
+generate_env_config() {
+    info "生成环境配置文件..."
     
-    cat > mongo-init.js << 'EOF'
-db = db.getSiblingDB('facebook_ads');
-
-// 创建管理员用户
-db.users.insertOne({
-    username: 'admin',
-    email: 'admin@example.com',
-    password: '$2a$10$rKmz.DGWYQNxCfRRxjkJ8uPxXKDNJiHaZrjpnSCh6yBhWJxqCbGR6', // admin123
-    role: 'admin',
-    isActive: true,
-    createdAt: new Date(),
-    lastLogin: null
-});
-
-// 创建示例落地页
-db.landingpages.insertOne({
-    name: '示例新闻页面',
-    type: 'cloak',
-    content: {
-        html: '<div class="news-container"><h1>最新新闻</h1><p>这是一个示例新闻页面，用于Facebook广告审核。</p></div>',
-        css: '.news-container { max-width: 800px; margin: 0 auto; padding: 20px; font-family: Arial, sans-serif; }',
-        js: 'console.log("News page loaded");'
-    },
-    seo: {
-        title: '最新新闻 - 今日头条',
-        description: '获取最新的新闻资讯和实时更新',
-        keywords: '新闻,资讯,头条'
-    },
-    template: 'news',
-    isActive: true,
-    analytics: {
-        views: 0,
-        uniqueViews: 0,
-        clicks: 0,
-        conversions: 0
-    },
-    createdBy: db.users.findOne({username: 'admin'})._id,
-    createdAt: new Date(),
-    updatedAt: new Date()
-});
-
-print('MongoDB初始化完成');
-EOF
-
-    log_success "MongoDB初始化脚本创建完成"
-}
-
-# 创建环境变量文件
-create_env_file() {
-    log_info "创建环境变量文件..."
+    if [ -f ".env" ]; then
+        warn ".env 文件已存在，跳过生成"
+        return 0
+    fi
     
-    if [[ ! -f .env ]]; then
-        cat > .env << EOF
+    # 生成随机密钥
+    local jwt_secret=$(openssl rand -base64 32)
+    local session_secret=$(openssl rand -base64 32)
+    
+    cat > .env << EOF
 # 应用配置
 NODE_ENV=production
 PORT=5000
 
 # 数据库配置
-MONGODB_URI=mongodb://admin:password123@mongodb:27017/facebook_ads?authSource=admin
+MONGODB_URI=mongodb://localhost:27017/facebook-ads
 
-# JWT密钥 (请在生产环境中更改)
-JWT_SECRET=your-super-secret-jwt-key-change-this-in-production-$(date +%s)
+# JWT 配置
+JWT_SECRET=${jwt_secret}
+JWT_EXPIRE=7d
+
+# 会话配置
+SESSION_SECRET=${session_secret}
+
+# 上传配置
+UPLOAD_MAX_SIZE=10485760
+
+# 日志配置
+LOG_LEVEL=info
+
+# 邮件配置 (可选)
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASS=
+
+# SSL 配置
+SSL_CERT_PATH=./ssl/cert.pem
+SSL_KEY_PATH=./ssl/key.pem
 
 # 其他配置
-REDIS_URL=redis://redis:6379
-LOG_LEVEL=info
+ADMIN_EMAIL=admin@example.com
+BACKUP_RETENTION_DAYS=30
 EOF
-        log_success "环境变量文件创建完成"
+    
+    log "环境配置文件生成完成"
+}
+
+# 生成 SSL 证书
+generate_ssl_cert() {
+    info "生成 SSL 证书..."
+    
+    if [ -f "ssl/cert.pem" ] && [ -f "ssl/key.pem" ]; then
+        warn "SSL 证书已存在，跳过生成"
+        return 0
+    fi
+    
+    # 生成自签名证书
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout ssl/key.pem \
+        -out ssl/cert.pem \
+        -subj "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=localhost"
+    
+    log "SSL 证书生成完成"
+}
+
+# 配置 Nginx
+configure_nginx() {
+    info "配置 Nginx..."
+    
+    local nginx_config="/etc/nginx/sites-available/facebook-ads"
+    local nginx_enabled="/etc/nginx/sites-enabled/facebook-ads"
+    
+    # 创建 Nginx 配置
+    cat > nginx.conf << EOF
+server {
+    listen 80;
+    listen [::]:80;
+    server_name localhost;
+    
+    # 重定向到 HTTPS
+    return 301 https://\$server_name\$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name localhost;
+    
+    # SSL 配置
+    ssl_certificate /path/to/ssl/cert.pem;
+    ssl_certificate_key /path/to/ssl/key.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+    
+    # 安全头
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    
+    # 代理到 Node.js 应用
+    location / {
+        proxy_pass http://localhost:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache_bypass \$http_upgrade;
+        proxy_read_timeout 86400;
+    }
+    
+    # 静态文件
+    location /static {
+        alias /path/to/static;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+    
+    # 上传文件
+    location /uploads {
+        alias /path/to/uploads;
+        expires 1y;
+        add_header Cache-Control "public";
+    }
+    
+    # 限制文件上传大小
+    client_max_body_size 100M;
+    
+    # Gzip 压缩
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+}
+EOF
+    
+    # 替换路径
+    local current_path=$(pwd)
+    sed -i "s|/path/to/ssl|${current_path}/ssl|g" nginx.conf
+    sed -i "s|/path/to/static|${current_path}/client/build/static|g" nginx.conf
+    sed -i "s|/path/to/uploads|${current_path}/uploads|g" nginx.conf
+    
+    log "Nginx 配置生成完成"
+}
+
+# 构建前端
+build_frontend() {
+    info "构建前端应用..."
+    
+    if [ -d "client" ]; then
+        cd client
+        npm run build
+        cd ..
+        log "前端构建完成"
     else
-        log_info "环境变量文件已存在，跳过创建"
+        warn "未找到前端目录，跳过构建"
     fi
 }
 
-# 安装依赖
-install_dependencies() {
-    log_info "安装后端依赖..."
-    npm install
+# 初始化数据库
+init_database() {
+    info "初始化数据库..."
     
-    log_info "安装前端依赖..."
-    cd client
-    npm install
-    cd ..
+    # 等待 MongoDB 启动
+    sleep 5
     
-    log_success "依赖安装完成"
+    # 创建默认管理员用户
+    node -e "
+    const mongoose = require('mongoose');
+    const bcrypt = require('bcryptjs');
+    
+    mongoose.connect('mongodb://localhost:27017/facebook-ads', {
+        useNewUrlParser: true,
+        useUnifiedTopology: true
+    });
+    
+    const userSchema = new mongoose.Schema({
+        username: String,
+        email: String,
+        password: String,
+        role: String,
+        isActive: Boolean,
+        createdAt: { type: Date, default: Date.now }
+    });
+    
+    const User = mongoose.model('User', userSchema);
+    
+    async function createAdmin() {
+        try {
+            const existingAdmin = await User.findOne({ username: 'admin' });
+            if (existingAdmin) {
+                console.log('管理员用户已存在');
+                process.exit(0);
+            }
+            
+            const hashedPassword = await bcrypt.hash('admin123', 10);
+            const admin = new User({
+                username: 'admin',
+                email: 'admin@example.com',
+                password: hashedPassword,
+                role: 'admin',
+                isActive: true
+            });
+            
+            await admin.save();
+            console.log('默认管理员用户创建成功');
+            console.log('用户名: admin');
+            console.log('密码: admin123');
+            process.exit(0);
+        } catch (error) {
+            console.error('创建管理员用户失败:', error);
+            process.exit(1);
+        }
+    }
+    
+    createAdmin();
+    " 2>/dev/null || warn "数据库初始化失败，请手动创建管理员用户"
+    
+    log "数据库初始化完成"
 }
 
-# 构建前端应用
-build_frontend() {
-    log_info "构建前端应用..."
-    cd client
-    npm run build
-    cd ..
-    log_success "前端构建完成"
+# 创建系统服务
+create_systemd_service() {
+    if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+        warn "跳过系统服务创建（仅支持 Linux）"
+        return 0
+    fi
+    
+    info "创建系统服务..."
+    
+    local service_file="/etc/systemd/system/facebook-ads.service"
+    local current_path=$(pwd)
+    
+    cat > facebook-ads.service << EOF
+[Unit]
+Description=Facebook Ads Landing Page System
+After=network.target mongodb.service
+Requires=mongodb.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=${current_path}
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+Environment=PATH=/usr/bin:/usr/local/bin
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    log "系统服务配置文件生成完成"
 }
 
 # 启动服务
 start_services() {
-    log_info "启动Docker服务..."
+    info "启动服务..."
     
-    # 停止可能正在运行的容器
-    docker-compose down
+    # 启动 MongoDB
+    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+        sudo systemctl start mongod
+        sudo systemctl enable mongod
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        brew services start mongodb-community
+    fi
     
-    # 构建和启动服务
-    docker-compose up -d --build
+    # 启动 Nginx
+    if command -v nginx &> /dev/null; then
+        if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+            sudo systemctl start nginx
+            sudo systemctl enable nginx
+        elif [[ "$OSTYPE" == "darwin"* ]]; then
+            brew services start nginx
+        fi
+    fi
     
-    log_success "服务启动完成"
+    log "服务启动完成"
 }
 
-# 等待服务启动
-wait_for_services() {
-    log_info "等待服务启动..."
+# 运行测试
+run_tests() {
+    info "运行测试..."
     
-    # 等待MongoDB启动
-    for i in {1..30}; do
-        if docker-compose exec mongodb mongo --eval "db.runCommand('ping').ok" &> /dev/null; then
-            break
-        fi
-        sleep 2
-    done
+    # 测试 MongoDB 连接
+    if command -v mongosh &> /dev/null; then
+        mongosh --eval "db.runCommand('ping')" facebook-ads >/dev/null 2>&1 && log "MongoDB 连接正常" || warn "MongoDB 连接失败"
+    fi
     
-    # 等待后端服务启动
-    for i in {1..30}; do
-        if curl -f http://localhost:5000/api/health &> /dev/null; then
-            break
-        fi
-        sleep 2
-    done
+    # 测试 Node.js 应用
+    if [ -f "src/server.js" ]; then
+        timeout 10 node src/server.js >/dev/null 2>&1 && log "Node.js 应用启动正常" || warn "Node.js 应用启动失败"
+    fi
     
-    log_success "服务启动完成"
+    log "测试完成"
 }
 
 # 显示部署信息
 show_deployment_info() {
-    log_success "部署完成！"
-    echo ""
-    echo "==================== 部署信息 ===================="
-    echo "应用地址: https://localhost"
-    echo "API地址: https://localhost/api"
-    echo "管理员账号: admin"
-    echo "管理员密码: admin123"
-    echo ""
-    echo "==================== 服务状态 ===================="
-    docker-compose ps
-    echo ""
-    echo "==================== 有用命令 ===================="
-    echo "查看日志: docker-compose logs -f"
-    echo "重启服务: docker-compose restart"
-    echo "停止服务: docker-compose down"
-    echo "更新服务: docker-compose up -d --build"
-    echo ""
-    echo "==================== 注意事项 ===================="
-    echo "1. 请修改默认密码和JWT密钥"
-    echo "2. 配置域名DNS解析"
-    echo "3. 申请正式SSL证书"
-    echo "4. 定期备份数据库"
-    echo "================================================="
+    echo
+    echo "======================================"
+    echo "Facebook广告落地页管理系统部署完成！"
+    echo "======================================"
+    echo
+    echo "📋 部署信息："
+    echo "   • 应用端口: 5000"
+    echo "   • 数据库: MongoDB (27017)"
+    echo "   • 反向代理: Nginx (80/443)"
+    echo "   • 日志目录: ./logs"
+    echo "   • 上传目录: ./uploads"
+    echo "   • 备份目录: ./backups"
+    echo
+    echo "🔐 默认管理员账户："
+    echo "   • 用户名: admin"
+    echo "   • 密码: admin123"
+    echo "   • 请立即修改默认密码！"
+    echo
+    echo "🌐 访问地址："
+    echo "   • HTTP: http://localhost"
+    echo "   • HTTPS: https://localhost"
+    echo
+    echo "🛠️ 管理命令："
+    echo "   • 启动应用: npm start"
+    echo "   • 开发模式: npm run dev"
+    echo "   • 构建前端: npm run build"
+    echo "   • 查看日志: tail -f logs/combined.log"
+    echo
+    echo "📚 更多信息请查看 README.md"
+    echo "======================================"
+}
+
+# 清理临时文件
+cleanup() {
+    info "清理临时文件..."
+    
+    # 清理可能的临时文件
+    rm -f get-docker.sh
+    rm -f mongodb.tgz
+    
+    log "清理完成"
 }
 
 # 主函数
 main() {
-    log_info "开始部署Facebook广告落地页管理系统..."
+    log "开始部署 Facebook广告落地页管理系统..."
     
+    # 检查环境
     check_root
     check_requirements
+    
+    # 安装依赖
+    install_nodejs
+    install_mongodb
+    install_nginx
+    
+    # 可选：安装 Docker
+    read -p "是否安装 Docker? (y/n): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        install_docker
+    fi
+    
+    # 配置系统
+    configure_firewall
     create_directories
+    generate_env_config
     generate_ssl_cert
-    create_mongo_init
-    create_env_file
+    
+    # 安装和构建应用
     install_dependencies
     build_frontend
+    
+    # 配置服务
+    configure_nginx
+    create_systemd_service
+    
+    # 初始化数据库
+    init_database
+    
+    # 启动服务
     start_services
-    wait_for_services
+    
+    # 运行测试
+    run_tests
+    
+    # 清理
+    cleanup
+    
+    # 显示部署信息
     show_deployment_info
     
-    log_success "部署完成！"
+    log "部署完成！"
 }
 
 # 错误处理
-trap 'log_error "部署失败！请检查错误信息并重试。"' ERR
+trap 'error "部署过程中出现错误，请检查日志"; exit 1' ERR
 
 # 运行主函数
 main "$@"

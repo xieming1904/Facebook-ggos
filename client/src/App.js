@@ -14,6 +14,7 @@ import LandingPages from './pages/LandingPages';
 import CloakSettings from './pages/CloakSettings';
 import Analytics from './pages/Analytics';
 import Users from './pages/Users';
+import Settings from './pages/Settings';
 import ProtectedRoute from './components/ProtectedRoute';
 
 function App() {
@@ -32,6 +33,7 @@ function App() {
                 <Route path="cloak" element={<CloakSettings />} />
                 <Route path="analytics" element={<Analytics />} />
                 <Route path="users" element={<Users />} />
+                <Route path="settings" element={<Settings />} />
               </Route>
             </Routes>
           </div>

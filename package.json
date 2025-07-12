@@ -28,7 +28,11 @@
     "express-useragent": "^1.0.15",
     "moment": "^2.29.4",
     "sharp": "^0.32.6",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "archiver": "^6.0.1",
+    "unzipper": "^0.10.14",
+    "winston": "^3.11.0",
+    "cron": "^3.1.6"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"

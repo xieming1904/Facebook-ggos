@@ -6,6 +6,9 @@ const mongoose = require('mongoose');
 const path = require('path');
 require('dotenv').config();
 
+const logger = require('./utils/logger');
+const loggerMiddleware = require('./middleware/loggerMiddleware');
+
 const app = express();
 
 // 中间件
@@ -13,6 +16,9 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// 日志中间件
+app.use(loggerMiddleware);
 
 // 限流中间件
 const limiter = rateLimit({
@@ -30,8 +36,14 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/facebook-
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('MongoDB connected'))
-.catch(err => console.error('MongoDB connection error:', err));
+.then(() => {
+  console.log('MongoDB connected');
+  logger.logSystemEvent('database_connected', { uri: process.env.MONGODB_URI ? 'configured' : 'default' });
+})
+.catch(err => {
+  console.error('MongoDB connection error:', err);
+  logger.error('Database connection failed', { error: err.message });
+});
 
 // 路由
 app.use('/api/health', require('./routes/health'));
@@ -40,6 +52,9 @@ app.use('/api/domains', require('./routes/domains'));
 app.use('/api/landing-pages', require('./routes/landingPages'));
 app.use('/api/cloak', require('./routes/cloak'));
 app.use('/api/analytics', require('./routes/analytics'));
+app.use('/api/settings', require('./routes/settings'));
+app.use('/api/system', require('./routes/system'));
+app.use('/api/logs', require('./routes/logs'));
 
 // Cloak中间件 - 检测Facebook爬虫
 app.use('/page/:id', require('./middleware/cloakMiddleware'));
@@ -55,10 +70,17 @@ app.get('*', (req, res) => {
 // 错误处理中间件
 app.use((err, req, res, next) => {
   console.error(err.stack);
+  logger.error('Unhandled error', { 
+    error: err.message, 
+    stack: err.stack,
+    url: req.originalUrl,
+    method: req.method 
+  });
   res.status(500).json({ error: 'Something went wrong!' });
 });
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  logger.logSystemEvent('server_started', { port: PORT, environment: process.env.NODE_ENV || 'development' });
 });

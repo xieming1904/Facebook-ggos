@@ -62,7 +62,12 @@ const Layout = () => {
       key: '/users',
       icon: <UserOutlined />,
       label: '用户管理',
-    }] : [])
+    }] : []),
+    {
+      key: '/settings',
+      icon: <SettingOutlined />,
+      label: '系统设置',
+    }
   ];
 
   const handleMenuClick = ({ key }) => {
@@ -84,6 +89,7 @@ const Layout = () => {
       key: 'settings',
       icon: <SettingOutlined />,
       label: '设置',
+      onClick: () => navigate('/settings')
     },
     {
       type: 'divider',
@@ -161,6 +167,8 @@ const Layout = () => {
                 onClick: ({ key }) => {
                   if (key === 'logout') {
                     handleLogout();
+                  } else if (key === 'settings') {
+                    navigate('/settings');
                   }
                 }
               }}
