@@ -20,8 +20,36 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['admin', 'user'],
+    enum: ['admin', 'user', 'owner', 'manager', 'viewer'],
     default: 'user'
+  },
+  organizationId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Organization',
+    required: false
+  },
+  organizationRole: {
+    type: String,
+    enum: ['owner', 'admin', 'manager', 'user', 'viewer'],
+    default: 'user'
+  },
+  permissions: {
+    domains: {
+      create: { type: Boolean, default: false },
+      read: { type: Boolean, default: true },
+      update: { type: Boolean, default: false },
+      delete: { type: Boolean, default: false }
+    },
+    pages: {
+      create: { type: Boolean, default: true },
+      read: { type: Boolean, default: true },
+      update: { type: Boolean, default: true },
+      delete: { type: Boolean, default: false }
+    },
+    analytics: {
+      read: { type: Boolean, default: true },
+      export: { type: Boolean, default: false }
+    }
   },
   isActive: {
     type: Boolean,
@@ -33,6 +61,20 @@ const userSchema = new mongoose.Schema({
   },
   lastLogin: {
     type: Date
+  },
+  settings: {
+    notifications: {
+      email: { type: Boolean, default: true },
+      push: { type: Boolean, default: true }
+    },
+    theme: { type: String, default: 'light' },
+    language: { type: String, default: 'zh-CN' }
+  },
+  profile: {
+    firstName: String,
+    lastName: String,
+    avatar: String,
+    phone: String
   }
 });
 

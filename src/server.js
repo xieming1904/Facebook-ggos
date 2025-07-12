@@ -4,12 +4,20 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const mongoose = require('mongoose');
 const path = require('path');
+const http = require('http');
 require('dotenv').config();
 
 const logger = require('./utils/logger');
 const loggerMiddleware = require('./middleware/loggerMiddleware');
 
+// 引入新的功能模块
+const WebSocketManager = require('./utils/websocketManager');
+const cacheManager = require('./utils/cacheManager');
+const queueManager = require('./utils/queueManager');
+const { tenantMiddleware } = require('./middleware/tenantMiddleware');
+
 const app = express();
+const server = http.createServer(app);
 
 // 中间件
 app.use(helmet());
@@ -19,6 +27,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // 日志中间件
 app.use(loggerMiddleware);
+
+// 多租户中间件
+app.use('/api', tenantMiddleware);
 
 // 限流中间件
 const limiter = rateLimit({
@@ -96,7 +107,89 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+
+// 初始化WebSocket管理器
+let wsManager;
+try {
+  wsManager = new WebSocketManager(server);
+  console.log('WebSocket manager initialized');
+  logger.logSystemEvent('websocket_initialized');
+} catch (error) {
+  console.error('Failed to initialize WebSocket manager:', error);
+  logger.error('WebSocket initialization failed', { error: error.message });
+}
+
+// 启动服务器
+server.listen(PORT, async () => {
   console.log(`Server running on port ${PORT}`);
   logger.logSystemEvent('server_started', { port: PORT, environment: process.env.NODE_ENV || 'development' });
+  
+  // 等待队列系统初始化
+  try {
+    await new Promise(resolve => {
+      const checkQueue = () => {
+        if (queueManager.isInitialized) {
+          resolve();
+        } else {
+          setTimeout(checkQueue, 100);
+        }
+      };
+      checkQueue();
+    });
+    
+    console.log('All systems initialized successfully');
+    logger.logSystemEvent('all_systems_ready');
+    
+    // 定期清理缓存
+    setInterval(async () => {
+      try {
+        await cacheManager.cleanup();
+      } catch (error) {
+        logger.error('Cache cleanup failed', { error: error.message });
+      }
+    }, 3600000); // 每小时清理一次
+    
+  } catch (error) {
+    console.error('System initialization error:', error);
+    logger.error('System initialization failed', { error: error.message });
+  }
+});
+
+// 优雅关闭
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  
+  try {
+    await queueManager.close();
+    await cacheManager.close();
+    if (wsManager) {
+      wsManager.close();
+    }
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
+});
+
+process.on('SIGINT', async () => {
+  console.log('SIGINT received, shutting down gracefully');
+  
+  try {
+    await queueManager.close();
+    await cacheManager.close();
+    if (wsManager) {
+      wsManager.close();
+    }
+    server.close(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Error during shutdown:', error);
+    process.exit(1);
+  }
 });
